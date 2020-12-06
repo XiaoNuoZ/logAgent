@@ -10,10 +10,10 @@ import (
 
 var cli *clientv3.Client
 
-type logEntry struct {
+//需要收集的配置的信息
+type LogEntry struct {
 	Topic string `json:"topic"`
 	Path string `json:"path"`
-
 }
 
 func Init(address string,timeout time.Duration)(err error){
@@ -30,7 +30,7 @@ func Init(address string,timeout time.Duration)(err error){
 }
 
 //从etcd中根据key获取配置信息
-func GetConf(key string)(logEntryConf []*logEntry,err error){
+func GetConf(key string)(logEntryConf []*LogEntry,err error){
 	ctx,cancel:=context.WithTimeout(context.Background(),time.Second)
 	resp,err:=cli.Get(ctx,key)
 	cancel()
@@ -48,4 +48,25 @@ func GetConf(key string)(logEntryConf []*logEntry,err error){
 		}
 	}
 	return
+}
+
+func WatchConf(key string,newConfCh chan<- []*LogEntry){
+	rch:=cli.Watch(context.Background(),key)
+	////从通道尝试取值，range会在没值的时候阻塞，有值后执行内部代码，然后循环回来继续阻塞等待下一个值
+	for wresp:=range rch{
+		for _,ev:=range wresp.Events{
+			//type可以取到类型，是删除修改还是新增
+			fmt.Println("type:",string(ev.Type),"----key:",string(ev.Kv.Key),"----value:",string(ev.Kv.Value))
+			var newConf []*LogEntry
+			if ev.Type!=clientv3.EventTypeDelete{
+				err:=json.Unmarshal(ev.Kv.Value,&newConf)
+				if err != nil {
+					fmt.Println("unmarshal failed,err:",err)
+					continue
+				}
+			}
+			fmt.Println("get new conf,",newConf)
+			newConfCh<-newConf
+		}
+	}
 }
